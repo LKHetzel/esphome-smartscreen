@@ -1,0 +1,627 @@
+### PLACE CODE BELOW YOUR CREDENTIALS AND WIFI BLOCKS ###
+
+########## CUSTOM BEGINS HERE ###########
+
+# I2C for touch
+i2c:
+  sda: GPIO8
+  scl: GPIO9
+  scan: true
+
+# SPI for display
+spi:
+  clk_pin: GPIO12
+  mosi_pin: GPIO11
+
+# I2S Audio Bus
+i2s_audio:
+  - id: i2s_audio_bus
+    i2s_lrclk_pin: GPIO7
+    i2s_bclk_pin: GPIO6
+
+# Microphone
+microphone:
+  - platform: i2s_audio
+    id: external_mic
+    adc_type: external
+    i2s_din_pin: GPIO5
+    channel: left
+    pdm: false
+    i2s_audio_id: i2s_audio_bus
+
+# Speaker
+speaker:
+  - platform: i2s_audio
+    id: external_speaker
+    dac_type: external
+    i2s_dout_pin: GPIO17
+    i2s_audio_id: i2s_audio_bus
+    sample_rate: 16000  # ← Add explicit sample rate
+    bits_per_sample: 16bit  # ← Add bit depth
+    i2s_comm_fmt: i2s_msb  # ← Add communication format
+
+# Micro Wake Word - use GitHub URL
+micro_wake_word:
+  id: micro_wake_word_jarvis
+  models:
+    - model: github://esphome/micro-wake-word-models/models/v2/hey_jarvis.json
+  on_wake_word_detected:
+    - voice_assistant.start:
+        wake_word: !lambda return wake_word;
+
+# Voice Assistant
+voice_assistant:
+  id: va
+  microphone: external_mic
+  micro_wake_word: micro_wake_word_jarvis
+  speaker: external_speaker
+  noise_suppression_level: 2
+  auto_gain: 31dBFS
+  volume_multiplier: 2.0
+  
+  on_listening:
+    - lvgl.label.update:
+        id: status_label
+        text: "Listening..."
+    - lvgl.obj.update:
+        id: status_card
+        bg_color: 0x1E90FF
+  
+  on_stt_end:
+    - lvgl.label.update:
+        id: status_label
+        text: "Processing..."
+  
+  on_tts_start:
+    - micro_wake_word.stop:  # Stop before speaker starts
+    - lvgl.label.update:
+        id: status_label
+        text: "Speaking..."
+  
+  on_idle:  # ← Changed from on_end to on_idle
+    - micro_wake_word.start: 
+    - lvgl.label.update:
+        id: status_label
+        text: "Say 'Hey Jarvis'"
+    - lvgl.obj.update:
+        id: status_card
+        bg_color: 0x333333
+  
+  on_error:
+    - micro_wake_word.start:
+    - lvgl.label.update:
+        id: status_label
+        text: "Error - Say 'Hey Jarvis'"
+
+# Backlight
+output:
+  - platform: ledc
+    pin: GPIO38
+    id: gpio_38_backlight_pwm
+
+light:
+  - platform: monochromatic
+    output: gpio_38_backlight_pwm
+    name: "Display Backlight"
+    id: back_light
+    restore_mode: ALWAYS_ON
+
+# Track light states from Home Assistant
+binary_sensor:
+  - platform: homeassistant
+    id: living_room_light_state
+    entity_id: light.living_room_lamp
+    internal: true
+
+  - platform: homeassistant
+    id: bedroom_light_state
+    entity_id: light.bedroom_lamp_2
+    internal: true
+  
+  - platform: homeassistant
+    id: office_light_state
+    entity_id: light.office_tall_lamp
+    internal: true
+
+# Display
+display:
+  - platform: ili9xxx
+    model: ST7796
+    id: my_display
+    cs_pin: GPIO10
+    dc_pin: GPIO13
+    reset_pin: GPIO14
+    rotation: 90  
+    invert_colors: false
+    #dimensions:
+    #  width: 480
+    #  height: 320
+    data_rate: 20MHz
+
+# Touch - FT6336U
+touchscreen:
+  - platform: ft63x6
+    id: my_touchscreen
+    interrupt_pin: GPIO4
+    reset_pin: GPIO16
+    transform:
+      swap_xy: true  # ← Rotate touch to match display
+
+# Time
+time:
+  - platform: homeassistant
+    id: ha_time
+    on_time:
+      - seconds: 0
+        then:
+          - lvgl.label.update:
+              id: time_label
+              text: !lambda |-
+                auto time = id(ha_time).now();
+                auto tm = time.to_c_tm();
+                static char time_str[6];
+                strftime(time_str, sizeof(time_str), "%I:%M", &tm);
+                return time_str;
+          - lvgl.label.update:
+              id: date_label
+              text: !lambda |-
+                auto time = id(ha_time).now();
+                auto tm = time.to_c_tm();
+                static char date_str[32];
+                strftime(date_str, sizeof(date_str), "%A, %B %d", &tm);
+                return date_str;
+
+# Sensors from Home Assistant
+sensor:
+  - platform: homeassistant
+    id: outdoor_temp
+    entity_id: weather.home
+    attribute: temperature
+    internal: true
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: weather_temp
+            text:
+              format: "%.0f°"
+              args: [ 'x' ]
+
+text_sensor:
+  - platform: homeassistant
+    id: weather_condition
+    entity_id: weather.home
+    internal: true
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: weather_text
+            text: !lambda return x.c_str();
+
+# Fonts
+font:
+  - file: "gfonts://Roboto"
+    id: roboto_14
+    size: 14
+  
+  - file: "gfonts://Roboto"
+    id: roboto_16
+    size: 16
+  
+  - file: "gfonts://Roboto"
+    id: roboto_20
+    size: 20
+  
+  - file: "gfonts://Roboto"
+    id: roboto_24
+    size: 24
+  
+  - file: "gfonts://Roboto@700"
+    id: roboto_bold_48
+    size: 48
+    glyphs: "0123456789:APM -°"
+  
+  - file: "gfonts://Roboto@700"
+    id: roboto_bold_64
+    size: 64
+    glyphs: "0123456789:APM -°"
+  
+  - file: "gfonts://Roboto@700"
+    id: roboto_bold_24
+    size: 24
+
+# LVGL - increase buffer to fix corruption
+lvgl:
+  log_level: WARN
+  color_depth: 16
+  bg_color: 0x000000
+  text_color: 0xFFFFFF
+  border_width: 0
+  outline_width: 0
+  
+  displays:
+    - my_display
+  
+  touchscreens:
+    - my_touchscreen
+  
+  theme:
+    button:
+      bg_color: 0x333333
+      radius: 15
+      border_width: 0
+      text_color: 0xFFFFFF
+  
+  pages:
+    # ====================
+    # MAIN PAGE - Dashboard (Landscape)
+    # ====================
+    - id: main_page
+      widgets:
+        - obj:
+            id: main_container
+            width: 100%
+            height: 100%
+            bg_color: 0x000000
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+            widgets:
+              # Navigation hint
+              - label:
+                  align: TOP_LEFT
+                  x: 10
+                  y: 10
+                  text_font: roboto_14
+                  text_color: 0x666666
+                  text: "Swipe for Lights"
+              
+              # Time - Large (centered)
+              - label:
+                  id: time_label
+                  align: CENTER
+                  y: -60
+                  text_font: roboto_bold_64
+                  text_color: 0xFFFFFF
+                  text: "12:00"
+              
+              # Date
+              - label:
+                  id: date_label
+                  align: CENTER
+                  y: 0
+                  text_font: roboto_24
+                  text_color: 0xAAAAAA
+                  text: "Loading..."
+              
+              # Weather Card
+              - obj:
+                  id: weather_card
+                  align: TOP_RIGHT
+                  x: -10
+                  y: 10
+                  width: 140
+                  height: 80
+                  bg_color: 0x1a1a1a
+                  radius: 15
+                  border_width: 0
+                  pad_all: 10
+                  widgets:
+                    - label:
+                        id: weather_text
+                        align: TOP_LEFT
+                        x: 5
+                        y: 5
+                        text_font: roboto_14
+                        text_color: 0xFFFFFF
+                        text: "Weather"
+                    
+                    - label:
+                        id: weather_temp
+                        align: BOTTOM_RIGHT
+                        x: -5
+                        y: -5
+                        text_font: roboto_bold_48
+                        text_color: 0xFFFFFF
+                        text: "--"
+              
+              # Quick Access Lights Button
+              - button:
+                  align: BOTTOM_MID
+                  y: -80
+                  width: 200
+                  height: 50
+                  bg_color: 0x1a1a1a
+                  checkable: false
+                  widgets:
+                    - label:
+                        align: CENTER
+                        text_font: roboto_20
+                        text_color: 0xFFFFFF
+                        text: "Lights"
+                  on_click:
+                    - lvgl.page.show: lights_page
+              
+              # Voice Assistant Status Card
+              - obj:
+                  id: status_card
+                  align: BOTTOM_MID
+                  y: -15
+                  width: 280
+                  height: 50
+                  bg_color: 0x333333
+                  radius: 25
+                  border_width: 0
+                  widgets:
+                    - label:
+                        id: status_label
+                        align: CENTER
+                        text_font: roboto_16
+                        text_color: 0xFFFFFF
+                        text: "Say 'Hey Jarvis'"
+    
+    # ====================
+    # LIGHTS PAGE (Landscape)
+    # ====================
+    - id: lights_page
+      widgets:
+        - obj:
+            id: lights_container
+            width: 100%
+            height: 100%
+            bg_color: 0x000000
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 10
+            layout:
+              type: FLEX
+              flex_flow: COLUMN
+              flex_align_main: START
+              flex_align_cross: CENTER
+            scrollbar_mode: "OFF"
+            widgets:
+              # Header
+              - obj:
+                  width: 100%
+                  height: 60
+                  bg_color: 0x000000
+                  border_width: 0
+                  layout:
+                    type: FLEX
+                    flex_flow: ROW
+                    flex_align_main: SPACE_BETWEEN
+                    flex_align_cross: CENTER
+                  widgets:
+                    # Back button
+                    - button:
+                        width: 60
+                        height: 50
+                        bg_color: 0x333333
+                        widgets:
+                          - label:
+                              align: CENTER
+                              text_font: roboto_24
+                              text: "<"
+                        on_click:
+                          - lvgl.page.show: main_page
+                    
+                    # Title
+                    - label:
+                        text_font: roboto_bold_24
+                        text_color: 0xFFFFFF
+                        text: "Lights"
+                    
+                    # All Off button
+                    - button:
+                        width: 80
+                        height: 50
+                        bg_color: 0x663333
+                        widgets:
+                          - label:
+                              align: CENTER
+                              text_font: roboto_16
+                              text: "All Off"
+                        on_click:
+                          - homeassistant.service:
+                              service: light.turn_off
+                              data:
+                                entity_id: light.living_room_lamp
+                          - homeassistant.service:
+                              service: light.turn_off
+                              data:
+                                entity_id: light.bedroom_lamp_2
+                          - homeassistant.service:
+                              service: light.turn_off
+                              data:
+                                entity_id: light.office_tall_lamp
+              
+              # Scrollable light list
+              - obj:
+                  id: lights_scroll_container
+                  width: 100%
+                  height: 240
+                  bg_color: 0x000000
+                  border_width: 0
+                  scrollbar_mode: "AUTO"
+                  layout:
+                    type: FLEX
+                    flex_flow: COLUMN
+                    flex_align_main: START
+                    flex_align_cross: CENTER
+                  widgets:
+                    # Living Room Light
+                    - obj:
+                        width: 450
+                        height: 60
+                        bg_color: 0x1a1a1a
+                        radius: 15
+                        border_width: 0
+                        pad_all: 10
+                        layout:
+                          type: FLEX
+                          flex_flow: ROW
+                          flex_align_main: SPACE_BETWEEN
+                          flex_align_cross: CENTER
+                        widgets:
+                          - label:
+                              text_font: roboto_20
+                              text_color: 0xFFFFFF
+                              text: "Living Room"
+                          - button:
+                              id: living_room_btn
+                              width: 80
+                              height: 45
+                              checkable: true
+                              widgets:
+                                - label:
+                                    id: living_room_btn_label
+                                    align: CENTER
+                                    text_font: roboto_16
+                                    text: "OFF"
+                              on_click:
+                                - homeassistant.service:
+                                    service: light.toggle
+                                    data:
+                                      entity_id: light.living_room_lamp
+                    
+                    # Bedroom Light
+                    - obj:
+                        width: 450
+                        height: 60
+                        bg_color: 0x1a1a1a
+                        radius: 15
+                        border_width: 0
+                        pad_all: 10
+                        layout:
+                          type: FLEX
+                          flex_flow: ROW
+                          flex_align_main: SPACE_BETWEEN
+                          flex_align_cross: CENTER
+                        widgets:
+                          - label:
+                              text_font: roboto_20
+                              text_color: 0xFFFFFF
+                              text: "Bedroom"
+                          - button:
+                              id: bedroom_btn
+                              width: 80
+                              height: 45
+                              checkable: true
+                              widgets:
+                                - label:
+                                    id: bedroom_btn_label
+                                    align: CENTER
+                                    text_font: roboto_16
+                                    text: "OFF"
+                              on_click:
+                                - homeassistant.service:
+                                    service: light.toggle
+                                    data:
+                                      entity_id: light.bedroom_lamp_2
+                    
+                    # Office Light
+                    - obj:
+                        width: 450
+                        height: 60
+                        bg_color: 0x1a1a1a
+                        radius: 15
+                        border_width: 0
+                        pad_all: 10
+                        layout:
+                          type: FLEX
+                          flex_flow: ROW
+                          flex_align_main: SPACE_BETWEEN
+                          flex_align_cross: CENTER
+                        widgets:
+                          - label:
+                              text_font: roboto_20
+                              text_color: 0xFFFFFF
+                              text: "Office"
+                          - button:
+                              id: office_btn
+                              width: 80
+                              height: 45
+                              checkable: true
+                              widgets:
+                                - label:
+                                    id: office_btn_label
+                                    align: CENTER
+                                    text_font: roboto_16
+                                    text: "OFF"
+                              on_click:
+                                - homeassistant.service:
+                                    service: light.toggle
+                                    data:
+                                      entity_id: light.office_tall_lamp
+
+# Update button states based on light states
+interval:
+  - interval: 1s
+    then:
+      # Living Room
+      - if:
+          condition:
+            binary_sensor.is_on: living_room_light_state
+          then:
+            - lvgl.widget.update:
+                id: living_room_btn
+                state:
+                  checked: true
+                bg_color: 0xFFAA00
+            - lvgl.label.update:
+                id: living_room_btn_label
+                text: "ON"
+          else:
+            - lvgl.widget.update:
+                id: living_room_btn
+                state:
+                  checked: false
+                bg_color: 0x333333
+            - lvgl.label.update:
+                id: living_room_btn_label
+                text: "OFF"
+      
+      # Bedroom
+      - if:
+          condition:
+            binary_sensor.is_on: bedroom_light_state
+          then:
+            - lvgl.widget.update:
+                id: bedroom_btn
+                state:
+                  checked: true
+                bg_color: 0xFFAA00
+            - lvgl.label.update:
+                id: bedroom_btn_label
+                text: "ON"
+          else:
+            - lvgl.widget.update:
+                id: bedroom_btn
+                state:
+                  checked: false
+                bg_color: 0x333333
+            - lvgl.label.update:
+                id: bedroom_btn_label
+                text: "OFF"
+      
+      # Office
+      - if:
+          condition:
+            binary_sensor.is_on: office_light_state
+          then:
+            - lvgl.widget.update:
+                id: office_btn
+                state:
+                  checked: true
+                bg_color: 0xFFAA00
+            - lvgl.label.update:
+                id: office_btn_label
+                text: "ON"
+          else:
+            - lvgl.widget.update:
+                id: office_btn
+                state:
+                  checked: false
+                bg_color: 0x333333
+            - lvgl.label.update:
+                id: office_btn_label
+                text: "OFF"
